@@ -6,12 +6,12 @@
 
 <h4>Purpose</h4>
 
-Trace a request from [`Swagger UI`](../../../wiki/swagger.md#what-is-swagger-ui) through the [`API`](../../../wiki/web-development.md#api) to the [database](../../../wiki/database.md#what-is-a-database) using the browser developer tools and [`pgAdmin`](../../../wiki/pgadmin.md#what-is-pgadmin).
+Trace a request from [`Swagger UI`](../../../wiki/swagger.md#what-is-swagger-ui) through the [API](../../../wiki/web-development.md#api) to the [database](../../../wiki/database.md#what-is-a-database) using the [browser developer tools](../../../wiki/browser-developer-tools.md#what-are-browser-developer-tools) and [`pgAdmin`](../../../wiki/pgadmin.md#what-is-pgadmin).
 
 <h4>Context</h4>
 
 Before adding new features, you will deploy the system to your VM and confirm it works.
-Then you will send requests and observe how data flows through the components: browser → `API` → database.
+Then you will send requests and observe how data flows through the components: browser → API → database.
 
 <!-- TODO add sequence diagram -->
 
@@ -44,6 +44,11 @@ Then you will send requests and observe how data flows through the components: b
 Title: `[Task] Observe System Component Interaction`
 
 ### 1.2. Deploy the back-end to the VM
+
+<!-- no toc -->
+- [1.2.1. Connect and get the code](#121-connect-and-get-the-code)
+- [1.2.2. Prepare the environment](#122-prepare-the-environment)
+- [1.2.3. Start the services](#123-start-the-services)
 
 #### 1.2.1. Connect and get the code
 
@@ -104,6 +109,36 @@ Title: `[Task] Observe System Component Interaction`
    docker compose --env-file .env.docker.secret ps
    ```
 
+   You should see all four services running with the status `Up`:
+
+   ```terminal
+   NAME       ...   STATUS
+   app        ...   Up
+   caddy      ...   Up
+   pgadmin    ...   Up
+   postgres   ...   Up (healthy)
+   ```
+
+   <!-- TODO link to this generic troubleshooting section in wiki -->
+
+   <details><summary>Troubleshooting</summary>
+
+   <h4>Port conflict (<code>port is already allocated</code>)</h4>
+
+   [Clean up `Docker`](../../../wiki/docker.md#clean-up-docker), then run the `docker compose up` command again.
+
+   <h4>Containers exit immediately</h4>
+
+   To rebuild all containers from scratch,
+
+   [run in the `VS Code Terminal`](../../../wiki/vs-code.md#run-a-command-in-the-vs-code-terminal):
+
+   ```terminal
+   docker compose --env-file .env.docker.secret down && docker compose --env-file .env.docker.secret up --build -d
+   ```
+
+   </details>
+
 ### 1.3. Open `Swagger UI`
 
 1. Open in a browser: `http://<your-vm-ip-address>:<caddy-port>/docs`. Replace:
@@ -113,16 +148,32 @@ Title: `[Task] Observe System Component Interaction`
 
 2. [Authorize](../../../wiki/swagger.md#authorize-in-swagger-ui) with [`API_KEY`](../../../wiki/dotenv-docker-secret.md#api_key) from [`.env.docker.secret`](../../../wiki/dotenv-docker-secret.md#what-is-envdockersecret).
 
+   You should see the `Swagger UI` page with the API documentation and available endpoints.
+
+   <!-- TODO write troubleshooting in wiki -->
+
+   <details><summary>Troubleshooting</summary>
+
+   <h4>Page does not load</h4>
+
+   Verify that all `Docker` containers are running (see [1.2.3. Start the services](#123-start-the-services)).
+
+   <h4>Authorization fails</h4>
+
+   Check that the [`API_KEY`](../../../wiki/dotenv-docker-secret.md#api_key) value in [`.env.docker.secret`](../../../wiki/dotenv-docker-secret.md#what-is-envdockersecret) matches the one you entered in `Swagger UI`.
+
+   </details>
+
 ### 1.4. Open the browser developer tools
 
 > [!NOTE]
-> See [What are browser developer tools](../../../wiki/browser-developer-tools.md).
+> See [What are browser developer tools](../../../wiki/browser-developer-tools.md#what-are-browser-developer-tools).
 
 1. [Open the `Network` tab](../../../wiki/browser-developer-tools.md#open-the-network-tab).
 
 ### 1.5. Send a request using `Swagger UI`
 
-1. In `Swagger UI`, expand the `POST /interactions` endpoint.
+1. In [`Swagger UI`](../../../wiki/swagger.md#what-is-swagger-ui), expand the `POST /interactions` endpoint.
 2. Click `Try it out`.
 3. Enter a request body in [`JSON`](../../../wiki/file-formats.md#json) format, for example:
 
@@ -161,7 +212,7 @@ Title: `[Task] Observe System Component Interaction`
 ### 1.7. Verify in `pgAdmin`
 
 > [!NOTE]
-> The API transformed the `JSON` from your request into a row in the `interacts` table.
+> The API transformed the [`JSON`](../../../wiki/file-formats.md#json) from your request into a row in the `interacts` table.
 
 1. [Open `pgAdmin`](../../../wiki/pgadmin.md#open-pgadmin).
 2. [Run a query](../../../wiki/pgadmin.md#run-the-query) on the `interacts` table:
@@ -175,13 +226,15 @@ Title: `[Task] Observe System Component Interaction`
 ### 1.8. Send another request and check the database
 
 1. In [`Swagger UI`](../../../wiki/swagger.md#what-is-swagger-ui), send another `POST /interactions` request with different values.
-2. In [`pgAdmin`](../../../wiki/pgadmin.md#what-is-pgadmin), run the query again and verify the new row appears.
+2. In [`pgAdmin`](../../../wiki/pgadmin.md#what-is-pgadmin), run the query again.
+3. Verify the new row appears.
 
 ### 1.9. Write comments for the issue
 
 > [!NOTE]
 > Select the last successful `POST /interactions` request.
 
+<!-- no toc -->
 - [Comment 1: write the request as `fetch` code](#191-comment-1-write-the-request-as-fetch-code)
 - [Comment 2: write the response](#192-comment-2-write-the-response)
 - [Comment 3: write the data output from `pgAdmin`](#193-comment-3-write-the-data-output-from-pgadmin)
