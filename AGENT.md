@@ -1,27 +1,32 @@
-# LLM Agent
+# Documentation Agent - Task 2
 
 ## Overview
 
-This agent is a CLI tool that connects to an LLM (Large Language Model) and returns structured JSON answers. It's the foundation for more complex agentic systems with tool calling.
+The Documentation Agent is an LLM-powered CLI tool that can answer questions about the software engineering toolkit by reading the project wiki. It uses tool calling to navigate and read documentation files.
 
 ## Architecture
 
-### Components
+### Core Components
 
-1. **Configuration** - Loads from `.env.agent.secret`
-2. **LLM Client** - Async HTTP client for API calls
-3. **Response Parser** - Validates and formats responses
+1. **Agentic Loop** (`run_agentic_loop`)
+   - Iterative process: LLM → tool calls → execute → feed back → repeat
+   - Maximum 10 iterations to prevent infinite loops
+   - Tracks all tool calls in history
 
-### LLM Provider: Qwen Code API
+2. **Tool Implementations** (`Tools` class)
+   - `list_files(path)`: Safely lists directory contents
+   - `read_file(path)`: Safely reads file contents
+   - Path validation prevents directory traversal attacks
 
-- **Provider**: Qwen Code API (hosted on VM)
-- **Model**: `qwen3-coder-plus`
-- **Why chosen**: Free (1000 requests/day), works from Russia, no credit card required, strong tool-calling support
+3. **LLM Integration**
+   - OpenAI-compatible API (Qwen Code API)
+   - Function calling with tool definitions
+   - System prompt guides the agent's strategy
 
-## Usage
+4. **Security Layer**
+   - Validates all paths against project root
+   - Prevents `../` traversal attacks
+   - File size limits (1MB)
+   - Handles non-existent files gracefully
 
-```bash
-# Ask a question
-uv run agent.py "What is the capital of France?"
-
-# Output: {"answer": "Paris.", "tool_calls": []}
+## Agentic Loop Flow
