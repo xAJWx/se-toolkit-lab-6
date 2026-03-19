@@ -30,6 +30,41 @@ I will use **Qwen Code API** because:
 - Environment variables via `python-dotenv`
 - Response format: `{"answer": "...", "tool_calls": []}`
 
+## Code Structure
+
+### Main Components
+
+1. **Configuration Loading** (`load_config()`):
+   - Reads `.env.agent.secret` and `.env.docker.secret`
+   - Validates required environment variables
+   - Returns `AgentConfig` pydantic model
+
+2. **LLM Response Model** (`LLMResponse`):
+   - `answer`: string - the LLM's answer
+   - `tool_calls`: list - empty for task 1
+
+3. **Main Function** (`main()`):
+   - Parse command line arguments
+   - Load configuration
+   - Call LLM API
+   - Output JSON to stdout
+
+### Data Flow
+
+```
+User question (CLI arg) 
+    → load_config() 
+    → call_llm_with_tools() 
+    → LLMResponse 
+    → JSON to stdout
+```
+
+## Error Handling
+
+- Missing env vars → ValueError with helpful message
+- LLM API errors → print to stderr, exit code 1
+- Invalid JSON output → caught by tests
+
 ## Testing Strategy
 
 - Create regression test that runs agent.py as subprocess
