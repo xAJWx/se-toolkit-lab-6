@@ -1,228 +1,211 @@
-# System Agent - Task 3
+# Agent Architecture
+
+This document describes the architecture and implementation of the SE Toolkit Lab agent.
 
 ## Overview
 
-The System Agent extends the Documentation Agent with a `query_api` tool, enabling it to interact with the deployed backend. It can now answer three categories of questions:
-
-- **Wiki documentation** (procedures, how-to guides)
-- **Static system facts** (framework, ports, status codes from source code)
-- **Live data queries** (item counts, statistics via API)
-
-This agent was built across three tasks:
-
-- **Task 1**: Basic LLM integration with JSON output
-- **Task 2**: Added file system tools (`list_files`, `read_file`) for documentation lookup
-- **Task 3**: Added `query_api` tool for backend interaction
+The agent is a CLI tool that answers questions about the project by using an LLM with function calling capabilities. It has access to three tools that allow it to interact with the real world: reading files, listing directories, and querying the backend API.
 
 ## Architecture
 
-### Core Components
+### Components
 
-1. **Agentic Loop**
-   - Iterative process with max 10 tool calls
-   - Tracks all tool calls in history
-   - Stops when LLM returns final answer without tool calls
+1. **agent.py** - Main entry point that implements the agentic loop
+2. **Tools** - Functions that the LLM can call to gather information
+3. **System Prompt** - Instructions that guide the LLM's behavior
+4. **Environment Configuration** - Credentials and settings loaded from `.env.agent.secret`
 
-2. **Tools**
-   - `list_files(path)`: Explore directories
-   - `read_file(path)`: Read files (wiki docs or source code)
-   - `query_api(method, path, body)`: Query backend API
+### Agentic Loop
 
-3. **LLM Integration**
-   - OpenAI-compatible API (Qwen Code API)
-   - Function calling with tool definitions
-   - Enhanced system prompt for tool selection
+The agent follows this loop:
 
-4. **Security & Configuration**
-   - Path validation prevents directory traversal
-   - API authentication via `LMS_API_KEY`
-   - All config from environment variables
+1. Send the user's question + tool definitions to the LLM
+2. If the LLM responds with `tool_calls`:
+   - Execute each tool
+   - Append results as `tool` role messages
+   - Go back to step 1
+3. If the LLM responds with a text message (no tool calls):
+   - Extract the answer and source
+   - Output JSON and exit
+4. If 10 tool calls are reached, stop and return whatever answer is available
 
-### Data Flow
+## Tools
 
-```
-User Question
-    ↓
-Load Config (.env files)
-    ↓
-Agentic Loop (max 10 iterations)
-    ├── Call LLM with tool definitions
-    ├── LLM returns tool calls or final answer
-    ├── Execute tools if needed
-    └── Add results to messages
-    ↓
-Output JSON: {"answer": "...", "tool_calls": [...], "source": "..."}
-```
+### read_file
 
-## Tool Selection Strategy
+Reads a file from the project repository.
 
-The LLM is instructed to choose tools based on question type:
+- **Parameters:** `path` (string) - Relative path from project root
+- **Returns:** File contents as string, or error message
+- **Security:** Prevents path traversal (no `../`)
 
-| Question Type | Example | Tools | Source Reference |
-|--------------|---------|-------|------------------|
-| Wiki/How-to | "How do I resolve a merge conflict?" | `list_files("wiki")` + `read_file` | wiki/git-workflow.md |
-| Source Code | "What framework does the backend use?" | `list_files("backend")` + `read_file` | backend/app/main.py |
-| Data Query | "How many items are in the database?" | `query_api("GET", "/items/")` | N/A (live data) |
-| Error Diagnosis | "Why is /analytics failing?" | `query_api` then `read_file` on error | backend/app/*.py |
+### list_files
 
-## Environment Variables
+Lists files and directories at a given path.
 
-| Variable | Purpose | Required | Default |
-|----------|---------|----------|---------|
-| `LLM_API_KEY` | LLM provider API key | Yes | - |
-| `LLM_API_BASE` | LLM API endpoint URL | Yes | - |
-| `LLM_MODEL` | Model name | Yes | - |
-| `LMS_API_KEY` | Backend API key for query_api | Yes | - |
-| `AGENT_API_BASE_URL` | Backend base URL | No | `http://localhost:42002` |
-
-**Important**: The agent never hardcodes these values. All are read from environment at runtime. The autochecker injects different values during evaluation.
-
-## Tool Definitions
+- **Parameters:** `path` (string) - Relative directory path from project root
+- **Returns:** Newline-separated listing of entries
+- **Security:** Prevents path traversal
 
 ### query_api
 
-The `query_api` tool allows the agent to query the backend API:
+Queries the backend API for data or system information.
 
-```python
-{
-    "type": "function",
-    "function": {
-        "name": "query_api",
-        "description": "Query the backend API to get real data from the system. Use this for questions about counts, statistics, or current system state.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "method": {"type": "string", "enum": ["GET", "POST"]},
-                "path": {"type": "string", "description": "API endpoint path"},
-                "body": {"type": "string", "description": "JSON request body for POST", "default": ""}
-            },
-            "required": ["method", "path"]
-        }
-    }
-}
-```
+- **Parameters:** 
+  - `method` (string) - HTTP method (GET, POST, PUT, DELETE)
+  - `path` (string) - API endpoint path
+  - `body` (string, optional) - JSON request body
+- **Returns:** JSON string with `status_code` and `body`
+- **Authentication:** Uses `LMS_API_KEY` from environment in `Authorization: Bearer` header
 
-**Authentication**: The tool includes `X-API-Key` header with `LMS_API_KEY` value.
+## Environment Variables
 
-**Response Format**:
+The agent reads all configuration from environment variables:
 
-```json
-{
-    "status_code": 200,
-    "body": {...}
-}
+| Variable | Purpose | Source |
+|----------|---------|--------|
+| `LLM_API_KEY` | LLM provider API key | `.env.agent.secret` |
+| `LLM_API_BASE` | LLM API endpoint URL | `.env.agent.secret` |
+| `LLM_MODEL` | Model name | `.env.agent.secret` |
+| `LMS_API_KEY` | Backend API key for `query_api` auth | `.env.docker.secret` |
+| `AGENT_API_BASE_URL` | Base URL for `query_api` | Optional, defaults to `http://localhost:42002` |
+
+## System Prompt Strategy
+
+The system prompt guides the LLM to use the right tool for each type of question:
+
+- **Wiki/documentation questions:** Use `list_files` to discover wiki files, then `read_file` to read the relevant file
+- **Source code questions:** Use `list_files` to explore directories like `backend/app/routers`, then `read_file` to read specific files
+- **Data queries:** Use `query_api` to query the backend API for items, analytics, etc.
+
+The prompt emphasizes:
+1. Thinking step by step
+2. Using tools to gather information
+3. Including source references in the answer
+4. Being concise
+
+## Decision Making: Wiki vs API Tools
+
+The LLM decides which tool to use based on keywords in the question:
+
+- **Wiki keywords:** "wiki", "documentation", "git workflow", "branch protection", "how to"
+- **Source code keywords:** "backend", "routers", "modules", "API endpoints", "source code"
+- **API keywords:** "database", "items", "analytics", "scores", "completion rate", "how many"
+
+## Lessons Learned
+
+### Challenge 1: Tool Message Ordering
+
+Initially, the agent added tool results to messages before the assistant's tool call request. This caused the Qwen API to reject requests with the error "messages with role 'tool' must be a response to a preceeding message with tool_calls". 
+
+**Solution:** Add the assistant message with tool_calls FIRST, then add tool results.
+
+### Challenge 2: Path Handling
+
+The agent initially used incorrect paths (e.g., "app" instead of "backend/app"). 
+
+**Solution:** Updated the system prompt to emphasize using full paths relative to project root.
+
+### Challenge 3: Source Extraction
+
+The `extract_source` function initially only looked for wiki files in tool results.
+
+**Solution:** Enhanced it to check:
+1. `read_file` tool call arguments for wiki paths
+2. Tool results for wiki file references
+3. The answer itself for wiki path patterns
+
+### Challenge 4: LLM Looping
+
+The agent sometimes got stuck in loops, repeatedly calling the same tool.
+
+**Solution:** 
+- Limited to 10 iterations
+- Improved system prompt to be more specific about when to stop
+- Made tool descriptions more precise
+
+## Final Evaluation Score
+
+Local benchmark results: **8/10 passed (80%)** ✓
+
+### Passed Questions:
+1. ✓ Wiki question about branch protection
+2. ✓ Wiki question about SSH connection
+3. ✓ Source code question about web framework (FastAPI)
+4. ✓ Source code question about API routers
+5. ✓ Database query question (items count)
+6. ✓ Authentication error question (401 status)
+7. ✓ Bug diagnosis question (division by zero in completion-rate)
+8. ✓ Multi-step debugging question (top-learners crash)
+
+### Failed Questions:
+9. ✗ Request journey question (requires reading multiple config files)
+10. ✗ Completion rate edge case question (requires deep code analysis)
+
+### Key Improvements Made:
+1. Reduced max_iterations from 10 to 5 initially, then back to 10 for complex questions
+2. Added `use_auth` parameter to `query_api` for testing unauthenticated access
+3. Improved system prompt with explicit examples and stopping conditions
+4. Added error handling to always return valid JSON
+5. Enhanced `extract_source` to handle multiple file types
+
+## Next Steps for Improvement
+
+1. **Improve completion rate:** The agent sometimes stops mid-task. Adding better termination conditions would help.
+
+2. **Optimize tool usage:** For questions about multiple files (like "list all routers"), the agent could read files in parallel or summarize more efficiently.
+
+3. **Better error handling:** When the API returns unexpected data, the agent should adapt rather than getting stuck.
+
+4. **Context management:** For long conversations, consider summarizing previous tool results to stay within token limits.
+
+## Testing
+
+Two regression tests are provided in `tests/test_agent_tools.py`:
+
+1. `test_wiki_question_uses_read_file` - Verifies that wiki questions trigger `read_file` usage
+2. `test_database_question_uses_query_api` - Verifies that data questions trigger `query_api` usage
+
+Run tests with:
+```bash
+uv run python tests/test_agent_tools.py
 ```
 
 ## Usage
 
 ```bash
-# Basic question
+# Simple question
 uv run agent.py "What is 2+2?"
 
 # Wiki question
-uv run agent.py "How do I resolve a merge conflict?"
-
-# Source code question
-uv run agent.py "What framework does the backend use?"
+uv run agent.py "According to the project wiki, what steps are needed to protect a branch?"
 
 # Data question
 uv run agent.py "How many items are in the database?"
+
+# Source code question
+uv run agent.py "What Python web framework does the backend use?"
 ```
 
 ## Output Format
 
-The agent outputs JSON to stdout:
+The agent outputs JSON with three fields:
 
 ```json
 {
   "answer": "The answer to the question",
-  "source": "wiki/git-workflow.md",
+  "source": "wiki/github.md",
   "tool_calls": [
     {
+      "tool": "list_files",
+      "args": {"path": "wiki"},
+      "result": "file1.md\nfile2.md"
+    },
+    {
       "tool": "read_file",
-      "args": {"path": "wiki/git-workflow.md"},
-      "result": "file contents..."
+      "args": {"path": "wiki/github.md"},
+      "result": "File contents..."
     }
   ]
 }
-```
-
-**Rules**:
-
-- Only valid JSON goes to stdout
-- All debug/progress output goes to stderr
-- Exit code 0 on success
-- Response within 60 seconds
-
-## Benchmark Results
-
-After implementing `query_api` and iterating on failures, the agent passes all 10 local benchmark questions:
-
-| # | Question Type | Status |
-|---|--------------|--------|
-| 1 | Wiki: Branch protection | ✓ |
-| 2 | Source: Framework | ✓ |
-| 3 | Data: Item count | ✓ |
-| 4 | Data: Completion rate | ✓ |
-| 5 | Source: Port | ✓ |
-| 6 | Source: Status code | ✓ |
-| 7 | Error diagnosis | ✓ |
-| 8 | Reasoning: Request lifecycle | ✓ |
-| 9 | Multi-step: Bug fix | ✓ |
-| 10 | Reasoning: Architecture | ✓ |
-
-## Lessons Learned
-
-1. **Tool descriptions matter**: The LLM relies heavily on tool descriptions to decide when to call them. Being explicit about use cases (e.g., "Use this for questions about counts") significantly improved tool selection.
-
-2. **Handle null content**: When the LLM returns tool calls, the `content` field can be `null` (not missing). Using `msg.get("content") or ""` instead of `msg.get("content", "")` prevents `AttributeError`.
-
-3. **Path validation is critical**: Security validation prevents the agent from reading files outside the project directory, protecting against path traversal attacks.
-
-4. **Environment variable separation**: Keeping `LLM_API_KEY` (for the LLM provider) separate from `LMS_API_KEY` (for backend auth) avoids confusion and security issues.
-
-5. **Iterative debugging**: Running `run_eval.py` and analyzing failures one at a time was more effective than trying to fix everything at once. The feedback hints guided improvements to the system prompt.
-
-6. **Content truncation**: Large files can cause the LLM to miss information. The `read_file` tool limits files to 1MB, but the LLM context window also matters for very long files.
-
-## Testing
-
-### Task 1 Tests
-
-- `test_agent_returns_valid_json`: Validates JSON output with required fields
-- `test_agent_handles_missing_argument`: Checks error handling
-- `test_agent_handles_long_question`: Tests with longer input
-
-### Task 3 Tests
-
-- `test_framework_question`: Verifies `read_file` usage for source questions
-- `test_port_question`: Checks port detection
-- `test_items_count_question`: Verifies `query_api` usage for data questions
-- `test_status_code_question`: Tests HTTP status code knowledge
-- `test_error_diagnosis_pattern`: Tests error analysis
-
-## Future Improvements
-
-1. **Caching**: Cache API responses to reduce redundant calls
-2. **Parallel tool execution**: Execute independent tool calls in parallel
-3. **Better error messages**: More descriptive errors for debugging
-4. **Source extraction**: Automatically extract line numbers from source files
-5. **Multi-modal support**: Add support for images and diagrams in wiki
-
-## Files Structure
-
-```
-.
-├── agent.py              # Main agent implementation
-├── AGENT.md              # This documentation
-├── plans/
-│   ├── task-1.md         # Task 1 implementation plan
-│   ├── task-2.md         # Task 2 implementation plan
-│   └── task-3.md         # Task 3 implementation plan
-├── tests/
-│   ├── test_agent.py     # Task 1 tests
-│   ├── test_documentation_agent.py  # Task 2 tests
-│   └── test_system_agent.py  # Task 3 tests
-├── .env.agent.secret     # LLM configuration
-└── .env.docker.secret    # Backend configuration
 ```
