@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import requests
+import httpx
 
 # ---------------------------------------------------------------------------
 # Load environment variables from .env.agent.secret
@@ -137,21 +137,22 @@ def query_api(method: str, path: str, body: str | None = None, use_auth: bool = 
         headers["Authorization"] = f"Bearer {LMS_API_KEY}"
 
     try:
-        if method.upper() == "GET":
-            response = requests.get(url, headers=headers, timeout=30)
-        elif method.upper() == "POST":
-            data = json.loads(body) if body else {}
-            response = requests.post(url, headers=headers, json=data, timeout=30)
-        elif method.upper() == "PUT":
-            data = json.loads(body) if body else {}
-            response = requests.put(url, headers=headers, json=data, timeout=30)
-        elif method.upper() == "DELETE":
-            response = requests.delete(url, headers=headers, timeout=30)
-        else:
-            return json.dumps({
-                "status_code": 400,
-                "body": {"error": f"Unsupported method: {method}"}
-            })
+        with httpx.Client(timeout=30.0) as client:
+            if method.upper() == "GET":
+                response = client.get(url, headers=headers)
+            elif method.upper() == "POST":
+                data = json.loads(body) if body else {}
+                response = client.post(url, headers=headers, json=data)
+            elif method.upper() == "PUT":
+                data = json.loads(body) if body else {}
+                response = client.put(url, headers=headers, json=data)
+            elif method.upper() == "DELETE":
+                response = client.delete(url, headers=headers)
+            else:
+                return json.dumps({
+                    "status_code": 400,
+                    "body": {"error": f"Unsupported method: {method}"}
+                })
 
         result = {
             "status_code": response.status_code,
@@ -159,9 +160,9 @@ def query_api(method: str, path: str, body: str | None = None, use_auth: bool = 
         }
         return json.dumps(result)
 
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         return json.dumps({"status_code": 408, "body": {"error": "Request timed out"}})
-    except requests.exceptions.ConnectionError as e:
+    except httpx.ConnectError as e:
         return json.dumps({"status_code": 0, "body": {"error": f"Connection error: {e}"}})
     except json.JSONDecodeError as e:
         return json.dumps({"status_code": 200, "body": {"error": f"Invalid JSON response: {e}"}})
@@ -316,8 +317,9 @@ def call_llm(messages: list[dict[str, Any]], max_tokens: int = 2000) -> dict[str
         "temperature": 0.7,
     }
 
-    response = requests.post(url, headers=headers, json=payload, timeout=120)
-    response.raise_for_status()
+    with httpx.Client(timeout=120.0) as client:
+        response = client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
 
     data = response.json()
     return data["choices"][0]["message"]
