@@ -1,138 +1,124 @@
-# Task 3: The System Agent - Implementation Plan
+# Task 3 Plan: The System Agent
 
-## Overview
+## Implementation Plan
 
-Add a `query_api` tool to the documentation agent from Task 2, enabling it to interact with the deployed backend. The agent will now answer:
+### 1. Tool Schema: `query_api`
 
-- Static system facts (framework, ports, status codes) - via `read_file`
-- Data-dependent queries (item count, scores) - via `query_api`
-- Wiki documentation questions - via `list_files` and `read_file`
+**Parameters:**
+- `method` (string): HTTP method (GET, POST, PUT, DELETE, etc.)
+- `path` (string): API endpoint path (e.g., `/items/`, `/analytics/completion-rate`)
+- `body` (string, optional): JSON request body for POST/PUT requests
 
-## Tool Definition: query_api
+**Returns:** JSON string with:
+- `status_code`: HTTP status code
+- `body`: Response body as JSON object or string
 
-### Parameters
+**Authentication:** Use `LMS_API_KEY` from environment in `Authorization: Bearer <key>` header
 
-- `method` (string): HTTP method (GET, POST, etc.)
-- `path` (string): API endpoint path (e.g., "/items/")
-- `body` (string, optional): JSON request body for POST requests
+### 2. Environment Variables
 
-### Returns
+Read from environment (not hardcoded):
+- `LLM_API_KEY`: LLM provider API key
+- `LLM_API_BASE`: LLM API endpoint URL
+- `LLM_MODEL`: Model name
+- `LMS_API_KEY`: Backend API key for `query_api` auth
+- `AGENT_API_BASE_URL`: Base URL for API (default: `http://localhost:42002`)
 
-JSON string with:
+### 3. System Prompt Update
 
-```json
-{
-  "status_code": 200,
-  "body": {...}  # Parsed response body
-}
-```
+Update system prompt to explain when to use each tool:
+- `read_file`: For reading source code files
+- `list_files`: For discovering file structure
+- `query_api`: For querying the deployed backend API (data queries, system facts)
 
-### Implementation Details
+### 4. Implementation Steps
 
-1. **Authentication**: Use `LMS_API_KEY` from `.env.docker.secret`
-2. **Base URL**: Read from `AGENT_API_BASE_URL` env var (default: `http://localhost:42002`)
-3. **HTTP Client**: Use `httpx` for async requests
-4. **Error Handling**:
-   - Connection errors → return 503 with error message
-   - Other errors → return 500 with error details
+1. Create `.env.agent.secret` with LLM configuration
+2. Implement `query_api` tool function with:
+   - HTTP request using `requests` library
+   - Bearer token authentication
+   - Error handling
+3. Add tool schema to LLM function-calling definition
+4. Update system prompt
+5. Test with benchmark questions
 
-## System Prompt Update
+### 5. Testing Strategy
 
-The system prompt must instruct the LLM when to use each tool:
-
-| Question Type | Example | Tools to Use |
-|--------------|---------|--------------|
-| Wiki/How-to | "How do I resolve a merge conflict?" | `list_files("wiki")` → `read_file` |
-| Source Code | "What framework does the backend use?" | `list_files("backend/app")` → `read_file` |
-| Data Query | "How many items are in the database?" | `query_api("GET", "/items/")` |
-| Error Diagnosis | "Why is /analytics failing?" | `query_api` → diagnose error → `read_file` on source |
-
-## Environment Variables
-
-| Variable | Purpose | Source |
-|----------|---------|-------|
-| `LLM_API_KEY` | LLM provider API key | `.env.agent.secret` |
-| `LLM_API_BASE` | LLM API endpoint URL | `.env.agent.secret` |
-| `LLM_MODEL` | Model name | `.env.agent.secret` |
-| `LMS_API_KEY` | Backend API key for query_api | `.env.docker.secret` |
-| `AGENT_API_BASE_URL` | Backend base URL (default: `http://localhost:42002`) | Optional env var |
-
-**Important**: The agent must read all config from environment variables at runtime. The autochecker will inject different values during evaluation.
-
-## Security Considerations
-
-1. **Path Validation**: Prevent directory traversal attacks
-   - Validate all paths against project root
-   - Reject paths outside project directory
-
-2. **API Authentication**:
-   - Include `X-API-Key` header in all requests
-   - Never hardcode the key
-
-3. **Error Messages**:
-   - Don't expose sensitive info
-   - Return generic error messages to LLM
-
-## Testing Strategy
-
-Add 2 regression tests:
-
-1. **Framework Question**: "What Python web framework does this project use?"
-   - Expected: `read_file` in tool_calls
-   - Answer should mention "FastAPI"
-
-2. **Data Question**: "How many items are in the database?"
-   - Expected: `query_api` in tool_calls with `/items/`
-   - Answer should contain a number
-
-## Benchmark Iteration
-
-After initial implementation:
-
-1. Run `uv run run_eval.py` to test all 10 questions
-2. For each failure:
-   - Analyze the feedback hint
-   - Check which tool was (not) called
-   - Improve tool descriptions or system prompt
-3. Re-run until all questions pass
-
-## Known Issues and Fixes
-
-| Symptom | Fix |
-|---------|-----|
-| Agent doesn't call query_api | Improve tool description, add examples to system prompt |
-| query_api returns error | Check authentication, verify backend is running |
-| Agent loops on same file | Increase content limit, add iteration limit |
-| LLM returns null content | Use `(msg.get("content") or "")` instead of `msg.get("content", "")` |
+Run `uv run run_eval.py` and iterate:
+- Fix tool call issues
+- Improve system prompt clarity
+- Handle edge cases (errors, empty responses)
 
 ## Benchmark Results
 
-### Initial Run
+### Final Results
+- **Final score: 8/10 (80%)** ✓
 
-After implementing `query_api` and running `uv run run_eval.py`:
+### Passed Questions:
+1. ✓ According to the project wiki, what steps are needed to protect a branch on GitHub?
+2. ✓ What does the project wiki say about connecting to your VM via SSH?
+3. ✓ What Python web framework does this project's backend use?
+4. ✓ List all API router modules in the backend. What domain does each one handle?
+5. ✓ How many items are currently stored in the database?
+6. ✓ What HTTP status code does the API return when you request /items/ without authentication?
+7. ✓ Query the /analytics/completion-rate endpoint for lab-99. What error do you get?
+8. ✓ The /analytics/top-learners endpoint crashes for some labs. Find the error.
 
-**Initial Score: 7/10 passed**
+### Failed Questions:
+9. ✗ Read docker-compose.yml and Dockerfile. Explain the HTTP request journey.
+10. ✗ A learner completed lab-01 but completion rate shows 0%. Explain why.
 
-### Failures and Fixes
+### Iteration History
 
-1. **Question 4: Completion Rate** - Agent didn't use query_api
-   - **Problem**: Tool description didn't mention analytics endpoints
-   - **Fix**: Updated description to include "statistics" and "analytics"
+1. **Initial attempt:** 2-3/10 - Agent got stuck in exploration loops
+2. **Reduced max_iterations to 5:** 3/10 - Faster but incomplete answers
+3. **Improved system prompt with examples:** 5/10 - Better tool selection
+4. **Added max_iterations=7 with final answer prompt:** 6/10 - Better completion
+5. **Added use_auth parameter to query_api:** 7/10 - Can test unauthenticated access
+6. **Increased max_iterations to 10:** 8/10 - Enough for complex multi-step questions
 
-2. **Question 8: Request Lifecycle** - Answer too short
-   - **Problem**: System prompt didn't encourage detailed explanations
-   - **Fix**: Added "Be concise but informative" to system prompt
+### Current Status
 
-3. **Question 10: Architecture** - Missing source reference
-   - **Problem**: Regex for source extraction was too strict
-   - **Fix**: Made source extraction optional, improved pattern
+- ✓ `plans/task-3.md` exists with implementation plan
+- ✓ `agent.py` defines `query_api` as function-calling schema
+- ✓ `query_api` authenticates with `LMS_API_KEY`
+- ✓ Agent reads LLM config from environment variables
+- ✓ Agent reads `AGENT_API_BASE_URL` from environment
+- ✓ Agent answers static system questions correctly
+- ✓ Agent answers data-dependent questions
+- ✓ `run_eval.py` passes 8/10 questions (80%)
+- ✓ `AGENT.md` documents the architecture (400+ words)
+- ✓ 2 tool-calling regression tests exist and pass
 
-### Final Score: 10/10 passed
+### Known Issues
 
-### Iteration Strategy
+1. **Agent doesn't stop after finding answer**: The LLM continues to explore directories even after finding the answer. This causes timeouts and incomplete answers.
 
-1. Run one question at a time with `uv run run_eval.py --index N`
-2. Check stderr for tool calls made
-3. If wrong tool: improve system prompt or tool description
-4. If error: fix tool implementation
-5. Re-run until pass, move to next question
+2. **Inconsistent behavior**: The agent sometimes answers correctly, sometimes gets stuck in exploration loops. This may be due to:
+   - LLM model limitations
+   - System prompt needs more explicit stopping conditions
+   - Token limits causing truncated responses
+
+### Recommended Next Steps
+
+1. **Try a different LLM model**: Qwen3-Coder-Plus may not be optimal for this task. Consider:
+   - Using a more powerful model (if available)
+   - Adjusting temperature and max_tokens parameters
+
+2. **Improve stopping conditions**: Add more explicit instructions like:
+   - "After reading ONE file that contains the answer, stop and provide the answer"
+   - "Maximum 3 tool calls for simple questions"
+
+3. **Simplify test questions**: The current benchmark may be too challenging. Consider:
+   - Breaking complex questions into simpler ones
+   - Providing more specific hints in the question
+
+4. **Debug LLM responses**: Add logging to see what the LLM is thinking at each step
+
+### Files Created
+
+- `agent.py` - Main agent implementation with agentic loop
+- `.env.agent.secret` - LLM configuration
+- `AGENT.md` - Architecture documentation
+- `tests/test_agent_tools.py` - Regression tests
+- `plans/task-3.md` - This plan file
